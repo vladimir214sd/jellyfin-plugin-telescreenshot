@@ -1,0 +1,25 @@
+---
+# Source manifest for jellyfin-plugin-repo-master / GitHub Actions release pipeline.
+# Hand-edited values; `manifest.json` is generated from this + computed checksum.
+name: "TeleScreenshot"
+guid: "13ec7a52-d9a7-46c3-be6c-c58149187a6c"
+version: "1.0.0.0"
+targetAbi: "10.11.0.0"
+framework: "net9.0"
+overview: "Screenshot button in the Jellyfin web player that sends the frame to a Telegram bot."
+description: >
+  Adds a "Take Screenshot" button to the Jellyfin web video player. On click it captures the
+  current frame and sends it to a Telegram bot via sendPhoto, with the item title and a
+  timecode as the caption. Bot token and chat id are configured in the plugin settings.
+  Requires the File Transformation plugin (IAmParadox27/jellyfin-plugin-file-transformation)
+  to inject the button into the web UI.
+category: "General"
+owner: "ZCodeProject"
+artifacts:
+  - "Jellyfin.Plugin.TeleScreenshot.dll"
+changelog: |
+  Initial release.
+  - Screenshot button injected into the web player via the File Transformation plugin.
+  - Frame capture via canvas drawImage -> sendPhoto (multipart/form-data).
+  - Caption with item title and timecode.
+  - "Test connection" button in the settings page (Telegram getMe).

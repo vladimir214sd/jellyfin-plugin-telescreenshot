@@ -1,0 +1,192 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8" />
+    <title>TeleScreenshot</title>
+</head>
+<body>
+    <div id="TeleScreenshotConfigPage" data-role="page" class="page type-interior pluginConfigurationPage"
+         data-require="emby-button,emby-checkbox,emby-input,emby-select">
+
+        <div data-role="content">
+            <div class="content-primary">
+                <form id="TeleScreenshotConfigForm">
+                    <div class="verticalSection">
+                        <div class="sectionTitleContainer flex align-items-center">
+                            <h2 class="sectionTitle">TeleScreenshot</h2>
+                        </div>
+                        <div class="fieldDescription">
+                            Adds a "Take Screenshot" button to the web video player. The captured
+                            frame is sent to a Telegram bot via <code>sendPhoto</code>. Requires the
+                            <a href="https://github.com/IAmParadox27/jellyfin-plugin-file-transformation"
+                               target="_blank" rel="noreferrer">File Transformation</a> plugin to inject
+                            the button into the player UI.
+                        </div>
+                    </div>
+
+                    <div class="verticalSection">
+                        <div class="verticalSection verticalSection-extrabottompadding">
+                            <h2 class="sectionTitle" style="margin-bottom: 0.5em;">General</h2>
+
+                            <div class="inputContainer">
+                                <label class="inputLabel inputLabelUnfocused" for="chkEnabled">Enable screenshot button</label>
+                                <input type="checkbox" id="chkEnabled" is="emby-checkbox" />
+                                <div class="fieldDescription">Show the screenshot button in the player and allow sending frames to Telegram.</div>
+                            </div>
+                        </div>
+
+                        <div class="verticalSection verticalSection-extrabottompadding">
+                            <h2 class="sectionTitle" style="margin-bottom: 0.5em;">Telegram</h2>
+
+                            <div class="inputContainer">
+                                <label class="inputLabel inputLabelUnfocused" for="txtBotToken">Bot token</label>
+                                <input type="text" id="txtBotToken" is="emby-input" autocomplete="off" spellcheck="false" />
+                                <div class="fieldDescription">
+                                    Create a bot with <a href="https://t.me/BotFather" target="_blank" rel="noreferrer">@BotFather</a>
+                                    and paste the token here, e.g. <code>123456789:ABC-DEF...</code>. Kept server-side only.
+                                </div>
+                            </div>
+
+                            <div class="inputContainer">
+                                <label class="inputLabel inputLabelUnfocused" for="txtChatId">Chat id</label>
+                                <input type="text" id="txtChatId" is="emby-input" autocomplete="off" spellcheck="false" />
+                                <div class="fieldDescription">
+                                    Numeric chat id (e.g. <code>123456789</code>) or <code>@channelusername</code>.
+                                    The recipient must message the bot first (send <code>/start</code>).
+                                </div>
+                            </div>
+
+                            <div class="inputContainer">
+                                <label class="inputLabel inputLabelUnfocused" for="txtCaptionFormat">Caption format</label>
+                                <input type="text" id="txtCaptionFormat" is="emby-input" />
+                                <div class="fieldDescription">
+                                    Placeholders: <code>{title}</code> (item name), <code>{timecode}</code> (current position as HH:MM:SS).
+                                </div>
+                            </div>
+
+                            <div class="inputContainer">
+                                <label class="inputLabel inputLabelUnfocused" for="chkShowCaptureToast">Show "captured" toast</label>
+                                <input type="checkbox" id="chkShowCaptureToast" is="emby-checkbox" />
+                                <div class="fieldDescription">Show an extra toast the moment a frame is captured, before it is sent.</div>
+                            </div>
+
+                            <button id="btnTest" type="button" is="emby-button" class="raised button-submit block emby-button">
+                                <span>Test connection</span>
+                            </button>
+                            <div id="testResult" class="fieldDescription" style="margin-top: 0.5em; min-height: 1.2em;"></div>
+                        </div>
+
+                        <div>
+                            <button is="emby-button" type="submit" class="raised button-submit block emby-button">
+                                <span>Save</span>
+                            </button>
+                        </div>
+                    </div>
+                </form>
+            </div>
+        </div>
+
+        <script type="text/javascript">
+            (function () {
+                // This guid MUST match Plugin.Id in Plugin.cs.
+                var pluginId = '13ec7a52-d9a7-46c3-be6c-c58149187a6c';
+
+                var form = document.getElementById('TeleScreenshotConfigForm');
+                var txtBotToken = document.getElementById('txtBotToken');
+                var txtChatId = document.getElementById('txtChatId');
+                var txtCaptionFormat = document.getElementById('txtCaptionFormat');
+                var chkEnabled = document.getElementById('chkEnabled');
+                var chkShowCaptureToast = document.getElementById('chkShowCaptureToast');
+                var btnTest = document.getElementById('btnTest');
+                var testResult = document.getElementById('testResult');
+
+                function setTestResult(text, ok) {
+                    testResult.textContent = text || '';
+                    testResult.style.color = ok === true ? '#3a9c3a'
+                                            : ok === false ? '#c33'
+                                            : '';
+                }
+
+                function loadConfig() {
+                    Dashboard.showLoadingMsg();
+                    ApiClient.getPluginConfiguration(pluginId).then(function (config) {
+                        txtBotToken.value = config.BotToken || '';
+                        txtChatId.value = config.ChatId || '';
+                        txtCaptionFormat.value = config.CaptionFormat || '{title} — {timecode}';
+                        chkEnabled.checked = config.Enabled !== false;
+                        chkShowCaptureToast.checked = config.ShowCaptureToast !== false;
+                        Dashboard.hideLoadingMsg();
+                    }).catch(function (err) {
+                        Dashboard.hideLoadingMsg();
+                        Dashboard.alert('Failed to load plugin configuration: ' + (err && err.statusText ? err.statusText : err));
+                    });
+                }
+
+                function currentConfigObject() {
+                    return {
+                        Enabled: chkEnabled.checked,
+                        BotToken: txtBotToken.value.trim(),
+                        ChatId: txtChatId.value.trim(),
+                        CaptionFormat: txtCaptionFormat.value,
+                        ShowCaptureToast: chkShowCaptureToast.checked
+                    };
+                }
+
+                form.addEventListener('submit', function (e) {
+                    Dashboard.showLoadingMsg();
+                    ApiClient.updatePluginConfiguration(pluginId, currentConfigObject()).then(function () {
+                        Dashboard.processPluginConfigurationUpdateResult();
+                    }).catch(function (err) {
+                        Dashboard.hideLoadingMsg();
+                        Dashboard.alert('Save failed: ' + (err && err.statusText ? err.statusText : err));
+                    });
+                    e.preventDefault();
+                    return false;
+                });
+
+                btnTest.addEventListener('click', function () {
+                    setTestResult('Testing…', null);
+                    btnTest.disabled = true;
+
+                    // Persist the current values first so the server test uses what the user typed,
+                    // not the last saved config.
+                    Dashboard.showLoadingMsg();
+                    ApiClient.updatePluginConfiguration(pluginId, currentConfigObject()).then(function () {
+                        return fetch(ApiClient.getUrl('/TeleScreenshot/Test'), {
+                            method: 'POST',
+                            headers: {
+                                'Authorization': 'MediaBrowser Token="' + ApiClient.accessToken() + '"',
+                                'Content-Type': 'application/json'
+                            }
+                        });
+                    }).then(function (resp) {
+                        return resp.json().then(function (body) { return { status: resp.status, body: body }; });
+                    }).then(function (result) {
+                        Dashboard.hideLoadingMsg();
+                        btnTest.disabled = false;
+                        var b = result.body || {};
+                        if (result.status === 200 && b.ok) {
+                            var name = (b.username ? '@' + b.username : '') || '';
+                            setTestResult('OK — bot ' + (name || '(connected)'), true);
+                        } else {
+                            setTestResult('Failed: ' + (b.message || ('HTTP ' + result.status)), false);
+                        }
+                    }).catch(function (err) {
+                        Dashboard.hideLoadingMsg();
+                        btnTest.disabled = false;
+                        setTestResult('Request failed: ' + (err && err.message ? err.message : err), false);
+                    });
+                });
+
+                // Bootstrap when the page is first shown.
+                document.getElementById('TeleScreenshotConfigPage').addEventListener('pageshow', loadConfig);
+                // Also support the modern view manager which may not fire pageshow on direct navigation.
+                if (typeof require !== 'undefined') {
+                    require(['apphost'], function () { /* ensure libs loaded */ });
+                }
+                loadConfig();
+            })();
+        </script>
+    </div>
+</body>
+</html>

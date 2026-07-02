@@ -1,0 +1,57 @@
+/*
+ * TeleScreenshot button styling. The button reuses jellyfin-web's `paper-icon-button-light`
+ * class so it visually matches the existing OSD controls; the rules below add a defensive
+ * baseline so the button is still usable if that class is absent.
+ */
+
+.telescreenshot-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 3em;
+    height: 3em;
+    padding: 0;
+    margin: 0 0.2em;
+    border: none;
+    background: transparent;
+    color: rgba(255, 255, 255, 0.9);
+    cursor: pointer;
+    border-radius: 50%;
+    vertical-align: middle;
+    transition: background-color 0.15s ease, color 0.15s ease;
+    -webkit-tap-highlight-color: transparent;
+}
+
+.telescreenshot-btn:hover,
+.telescreenshot-btn:focus {
+    background-color: rgba(255, 255, 255, 0.12);
+    color: #fff;
+    outline: none;
+}
+
+.telescreenshot-btn:active {
+    background-color: rgba(255, 255, 255, 0.2);
+}
+
+.telescreenshot-btn svg {
+    width: 1.6em;
+    height: 1.6em;
+    display: block;
+}
+
+/* Floating fallback used when no OSD container was found. Keeps the button reachable. */
+.telescreenshot-btn--floating {
+    position: fixed;
+    right: 16px;
+    bottom: 80px;
+    z-index: 2147483000;
+    width: 44px;
+    height: 44px;
+    background-color: rgba(0, 0, 0, 0.6);
+    backdrop-filter: blur(4px);
+}
+
+.telescreenshot-btn--floating svg {
+    width: 24px;
+    height: 24px;
+}

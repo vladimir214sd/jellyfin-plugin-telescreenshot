@@ -1,0 +1,192 @@
+name: '🚀 Release Plugin'
+
+# Build the plugin with JPRM, attach the zip to a GitHub Release, then regenerate
+# manifest.json on the gh-pages branch so users can add the repository to Jellyfin.
+#
+# Triggers:
+#   - push of a tag like "v1.0.0.0" -> full release + manifest update
+#   - manual dispatch (defaults to building a "unstable" release)
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to publish (e.g. 1.0.0.0). Leave empty to use build.yaml.'
+        required: false
+        default: ''
+      prerelease:
+        description: 'Mark as pre-release'
+        type: boolean
+        required: false
+        default: true
+
+permissions:
+  contents: write   # needed to create the Release and push to gh-pages
+  pages: write
+  id-token: write
+
+jobs:
+  build:
+    name: Build & Publish
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '9.0.x'
+
+      - name: Resolve version
+        id: ver
+        run: |
+          if [ "${{ github.event_name }}" = "push" ]; then
+            # tag "v1.0.0.0" -> "1.0.0.0"
+            V="${GITHUB_REF_NAME#v}"
+            echo "version=$V" >> "$GITHUB_OUTPUT"
+            echo "prerelease=false" >> "$GITHUB_OUTPUT"
+            echo "tag=${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
+          else
+            V="${{ github.event.inputs.version }}"
+            if [ -z "$V" ]; then V="0.0.0.0"; fi
+            echo "version=$V" >> "$GITHUB_OUTPUT"
+            echo "prerelease=${{ github.event.inputs.prerelease }}" >> "$GITHUB_OUTPUT"
+            TAG="v$V"
+            echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Build plugin (JPRM)
+        id: jprm
+        uses: oddstr13/jellyfin-plugin-repository-manager@v1.1.1
+        with:
+          dotnet-target: 'net9.0'
+
+      - name: Show artifact
+        run: ls -la artifacts/
+
+      - name: Create / update GitHub Release and upload asset
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.ver.outputs.tag }}
+          name: ${{ steps.ver.outputs.tag }}
+          prerelease: ${{ steps.ver.outputs.prerelease }}
+          files: artifacts/*.zip
+          generate_release_notes: true
+
+      - name: Compute download URL
+        id: url
+        run: |
+          ZIP=$(ls artifacts/*.zip | head -n1)
+          BASENAME=$(basename "$ZIP")
+          # Strip an optional leading "v" from the tag for the URL path (GitHub keeps the tag as-is).
+          TAG="${{ steps.ver.outputs.tag }}"
+          OWNER="${{ github.repository_owner }}"
+          REPO="${{ github.event.repository.name }}"
+          # Use the API-friendly releases/download path which is stable.
+          echo "url=https://github.com/${OWNER}/${REPO}/releases/download/${TAG}/${BASENAME}" >> "$GITHUB_OUTPUT"
+          echo "zip=$BASENAME" >> "$GITHUB_OUTPUT"
+
+      - name: Publish manifest to gh-pages
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -e
+          VERSION="${{ steps.ver.outputs.version }}"
+          URL="${{ steps.url.outputs.url }}"
+          OWNER="${{ github.repository_owner }}"
+          REPO="${{ github.event.repository.name }}"
+          GUID="13ec7a52-d9a7-46c3-be6c-c58149187a6c"
+          DEP="5e87cc92-571a-4d8d-8d98-d2d4147f9f90"
+          TIMESTAMP="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          IMAGE="https://raw.githubusercontent.com/${OWNER}/${REPO}/gh-pages/logo.png"
+
+          mkdir -p site
+          cp -f src/logo.png site/logo.png 2>/dev/null || true
+
+          # Merge into manifest.json (create if absent). Python keeps JSON clean.
+          python3 - <<PY
+          import json, sys, base64, hashlib, urllib.request
+          version = "$VERSION"
+          url = "$URL"
+          ts = "$TIMESTAMP"
+          dep = "$DEP"
+          guid = "$GUID"
+          image = "$IMAGE"
+          owner = "$OWNER"
+          repo = "$REPO"
+
+          # download the zip we just published to compute its MD5 (Jellyfin validates checksum)
+          try:
+              data = urllib.request.urlopen(urllib.request.Request(url, headers={"User-Agent":"x"})).read()
+              checksum = hashlib.md5(data).hexdigest().upper()
+          except Exception as e:
+              print("WARN: could not compute checksum:", e)
+              checksum = ""
+
+          entry = {
+              "guid": guid,
+              "name": "TeleScreenshot",
+              "description": "Adds a screenshot button to the Jellyfin web player that sends the captured frame to a Telegram bot. Requires the File Transformation plugin.",
+              "overview": "Screenshot button in the web player that sends frames to a Telegram bot.",
+              "owner": owner,
+              "category": "General",
+              "imageUrl": image,
+              "versions": [
+                  {
+                      "version": version,
+                      "changelog": "Screenshot button in the web player; sends PNG frame to a Telegram bot via sendPhoto with item title + timecode caption.",
+                      "targetAbi": "10.11.0.0",
+                      "sourceUrl": url,
+                      "checksum": checksum,
+                      "timestamp": ts,
+                      "dependencies": [dep]
+                  }
+              ]
+          }
+
+          manifest = []
+          try:
+              with open("manifest.json", encoding="utf-8") as f:
+                  manifest = json.load(f)
+          except FileNotFoundError:
+              manifest = []
+
+          found = False
+          for p in manifest:
+              if p.get("guid") == guid:
+                  # replace existing entry wholesale (keeps it simple / deterministic)
+                  manifest[manifest.index(p)] = entry
+                  found = True
+                  break
+          if not found:
+              manifest.append(entry)
+
+          with open("site/manifest.json", "w", encoding="utf-8") as f:
+              json.dump(manifest, f, indent=2, ensure_ascii=False)
+          print("manifest.json written for version", version)
+          PY
+
+          # Commit site/ to the gh-pages branch (orphan, no history clutter).
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git checkout --orphan gh-pages
+          git rm -rf --cached . >/dev/null 2>&1 || true
+          # carry only the generated site
+          rm -rf tmp_site && cp -r site tmp_site
+          git clean -fdx >/dev/null 2>&1 || true
+          rm -rf site
+          mv tmp_site site
+          git add site
+          git commit -m "Publish manifest v${VERSION}" --allow-empty
+          git push --force origin HEAD:gh-pages
+
+      - name: Summary
+        run: |
+          echo "### Published ✅" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Release: https://github.com/${{ github.repository }}/releases/tag/${{ steps.ver.outputs.tag }}" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Plugin zip: ${{ steps.url.outputs.url }}" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Manifest: https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}/manifest.json" >> "$GITHUB_STEP_SUMMARY"

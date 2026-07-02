@@ -1,0 +1,54 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project Sdk="Microsoft.NET.Sdk">
+
+    <PropertyGroup>
+        <TargetFramework>net9.0</TargetFramework>
+        <RootNamespace>Jellyfin.Plugin.TeleScreenshot</RootNamespace>
+        <AssemblyName>Jellyfin.Plugin.TeleScreenshot</AssemblyName>
+        <Nullable>enable</Nullable>
+        <ImplicitUsings>enable</ImplicitUsings>
+        <GenerateDocumentationFile>false</GenerateDocumentationFile>
+        <GenerateAssemblyInfo>false</GenerateAssemblyInfo>
+        <EnableDefaultEmbeddedResourceItems>false</EnableDefaultEmbeddedResourceItems>
+        <TreatWarningsAsErrors>false</TreatWarningsAsErrors>
+    </PropertyGroup>
+
+    <PropertyGroup>
+        <!--
+            Jellyfin provides these assemblies at runtime, so we exclude the runtime assets
+            from the produced dll (we only compile against them).
+        -->
+        <JellyfinNugetVersion>10.11.*-*</JellyfinNugetVersion>
+    </PropertyGroup>
+
+    <ItemGroup>
+        <PackageReference Include="Jellyfin.Controller" Version="$(JellyfinNugetVersion)" ExcludeAssets="runtime" />
+        <PackageReference Include="Jellyfin.Model" Version="$(JellyfinNugetVersion)" ExcludeAssets="runtime" />
+        <PackageReference Include="Microsoft.Extensions.Http" Version="9.0.*" />
+        <PackageReference Include="Newtonsoft.Json" Version="13.0.1" />
+    </ItemGroup>
+
+    <!-- Web assets served via /web/configurationpage?name=... -->
+    <ItemGroup>
+        <EmbeddedResource Include="Configuration\configPage.html" />
+        <EmbeddedResource Include="Web\telescreenshot.js" />
+        <EmbeddedResource Include="Web\telescreenshot.css" />
+    </ItemGroup>
+
+    <!-- Plugin logo copied next to the dll (referenced by the dashboard). -->
+    <ItemGroup>
+        <None Include="..\logo.png" Pack="true" PackagePath="\" CopyToOutputDirectory="Always" />
+    </ItemGroup>
+
+    <!-- Dev convenience: drop the build into a local Jellyfin plugin folder if configured. -->
+    <Target Name="CopyToDevPluginFolder" AfterTargets="Build" Condition="'$(JellyfinPluginDir)' != ''">
+        <PropertyGroup>
+            <DevPluginDir>$(JellyfinPluginDir)\13ec7a52-d9a7-46c3-be6c-c58149187a6c\</DevPluginDir>
+        </PropertyGroup>
+        <MakeDir Directories="$(DevPluginDir)" />
+        <Copy SourceFiles="$(OutputPath)$(AssemblyName).dll" DestinationFolder="$(DevPluginDir)" />
+        <Copy SourceFiles="$(OutputPath)$(AssemblyName).pdb" DestinationFolder="$(DevPluginDir)" SkipUnchangedFiles="true" Condition="Exists('$(OutputPath)$(AssemblyName).pdb')" />
+        <Copy SourceFiles="$(MSBuildThisFileDirectory)..\logo.png" DestinationFolder="$(DevPluginDir)" SkipUnchangedFiles="true" />
+    </Target>
+
+</Project>
