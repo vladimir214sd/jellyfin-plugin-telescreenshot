@@ -184,11 +184,15 @@ public class TelegramScreenshotController : ControllerBase
                 return "Unknown title";
             }
 
-            // BaseItem exposes SeriesName for episodes; fall back to Name otherwise.
-            string? series = item.SeriesName;
-            return string.IsNullOrWhiteSpace(series)
-                ? (item.Name ?? "Unknown title")
-                : $"{series} — {item.Name}";
+            // SeriesName is declared on Episode (and a few other Series-bearing types), not on
+            // BaseItem itself, so cast before reading.
+            if (item is MediaBrowser.Controller.Entities.TV.Episode ep
+                && !string.IsNullOrWhiteSpace(ep.SeriesName))
+            {
+                return $"{ep.SeriesName} — {ep.Name}";
+            }
+
+            return item.Name ?? "Unknown title";
         }
         catch (Exception ex)
         {
