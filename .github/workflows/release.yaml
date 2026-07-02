@@ -101,24 +101,26 @@ jobs:
           GUID="13ec7a52-d9a7-46c3-be6c-c58149187a6c"
           DEP="5e87cc92-571a-4d8d-8d98-d2d4147f9f90"
           TIMESTAMP="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-          IMAGE="https://raw.githubusercontent.com/${OWNER}/${REPO}/gh-pages/logo.png"
 
-          mkdir -p site
-          cp -f logo.png site/logo.png 2>/dev/null || true
+          # Build the site in a temp dir OUTSIDE the repo worktree so it survives any branch switch.
+          SITE="$(mktemp -d)"
+          cp -f logo.png "$SITE/logo.png" 2>/dev/null || true
 
-          # Merge into manifest.json (create if absent). Python keeps JSON clean.
-          python3 - <<PY
-          import json, sys, base64, hashlib, urllib.request
-          version = "$VERSION"
-          url = "$URL"
-          ts = "$TIMESTAMP"
-          dep = "$DEP"
-          guid = "$GUID"
-          image = "$IMAGE"
-          owner = "$OWNER"
-          repo = "$REPO"
+          VERSION="$VERSION" URL="$URL" TIMESTAMP="$TIMESTAMP" \
+          DEP="$DEP" GUID="$GUID" OWNER="$OWNER" REPO="$REPO" SITE="$SITE" \
+          python3 - <<'PY'
+          import json, hashlib, os, urllib.request
+          version = os.environ["VERSION"]
+          url = os.environ["URL"]
+          ts = os.environ["TIMESTAMP"]
+          dep = os.environ["DEP"]
+          guid = os.environ["GUID"]
+          owner = os.environ["OWNER"]
+          repo = os.environ["REPO"]
+          site = os.environ["SITE"]
+          image = f"https://raw.githubusercontent.com/{owner}/{repo}/gh-pages/logo.png"
 
-          # download the zip we just published to compute its MD5 (Jellyfin validates checksum)
+          # Download the zip we just published to compute its MD5 (Jellyfin validates checksum).
           try:
               data = urllib.request.urlopen(urllib.request.Request(url, headers={"User-Agent":"x"})).read()
               checksum = hashlib.md5(data).hexdigest().upper()
@@ -147,41 +149,38 @@ jobs:
               ]
           }
 
+          # Try to merge into an existing gh-pages manifest; fall back to a fresh one.
           manifest = []
           try:
-              with open("manifest.json", encoding="utf-8") as f:
-                  manifest = json.load(f)
-          except FileNotFoundError:
+              import subprocess
+              raw = subprocess.run(
+                  ["git", "show", "origin/gh-pages:manifest.json"],
+                  capture_output=True, text=True, check=True).stdout
+              manifest = json.loads(raw) if raw.strip() else []
+          except Exception:
               manifest = []
 
-          found = False
-          for p in manifest:
+          for i, p in enumerate(manifest):
               if p.get("guid") == guid:
-                  # replace existing entry wholesale (keeps it simple / deterministic)
-                  manifest[manifest.index(p)] = entry
-                  found = True
+                  manifest[i] = entry
                   break
-          if not found:
+          else:
               manifest.append(entry)
 
-          with open("site/manifest.json", "w", encoding="utf-8") as f:
+          with open(os.path.join(site, "manifest.json"), "w", encoding="utf-8") as f:
               json.dump(manifest, f, indent=2, ensure_ascii=False)
           print("manifest.json written for version", version)
           PY
 
-          # Commit site/ to the gh-pages branch (orphan, no history clutter).
+          # Publish the temp site as an orphan gh-pages branch (clean, no source history).
+          cd "$SITE"
+          git init -q
+          git checkout -q -b gh-pages
           git config user.name  "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git checkout --orphan gh-pages
-          git rm -rf --cached . >/dev/null 2>&1 || true
-          # carry only the generated site
-          rm -rf tmp_site && cp -r site tmp_site
-          git clean -fdx >/dev/null 2>&1 || true
-          rm -rf site
-          mv tmp_site site
-          git add site
-          git commit -m "Publish manifest v${VERSION}" --allow-empty
-          git push --force origin HEAD:gh-pages
+          git add -A
+          git commit -q -m "Publish manifest v${VERSION}"
+          git push --force "https://x-access-token:${GITHUB_TOKEN}@github.com/${OWNER}/${REPO}.git" gh-pages:gh-pages
 
       - name: Summary
         run: |
