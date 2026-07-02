@@ -4,9 +4,9 @@
     "name": "TeleScreenshot",
     "description": "Adds a screenshot button to the Jellyfin web player that sends the captured frame to a Telegram bot.",
     "overview": "Screenshot button in the web player that sends frames to a Telegram bot.",
-    "owner": "ZCodeProject",
+    "owner": "vladimir214sd",
     "category": "General",
-    "imageUrl": "",
+    "imageUrl": "https://raw.githubusercontent.com/vladimir214sd/jellyfin-plugin-telescreenshot/master/logo.png",
     "versions": [
       {
         "version": "1.0.0.0",

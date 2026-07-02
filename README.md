@@ -90,12 +90,11 @@ valid.
 Requirements: .NET 9 SDK.
 
 ```bash
-cd src
 dotnet build -c Release
 ```
 
 The output DLL is at
-`src/Jellyfin.Plugin.TeleScreenshot/bin/Release/net9.0/Jellyfin.Plugin.TeleScreenshot.dll`.
+`Jellyfin.Plugin.TeleScreenshot/bin/Release/net9.0/Jellyfin.Plugin.TeleScreenshot.dll`.
 
 For fast local iteration, build with the `JellyfinPluginDir` property pointing at your
 Jellyfin plugins folder; the post-build target copies the DLL, PDB and logo into the right

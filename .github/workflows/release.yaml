@@ -104,7 +104,7 @@ jobs:
           IMAGE="https://raw.githubusercontent.com/${OWNER}/${REPO}/gh-pages/logo.png"
 
           mkdir -p site
-          cp -f src/logo.png site/logo.png 2>/dev/null || true
+          cp -f logo.png site/logo.png 2>/dev/null || true
 
           # Merge into manifest.json (create if absent). Python keeps JSON clean.
           python3 - <<PY
