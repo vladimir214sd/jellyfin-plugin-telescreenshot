@@ -60,8 +60,14 @@ For a channel, create / open the channel, add the bot as administrator, and use
 
 ### 3. Install the plugins
 
-In **Dashboard → Plugins → Repositories**, add the File Transformation plugin's repository
-(see its README for the manifest URL), then install:
+In **Dashboard → Plugins → Repositories**, add **both** plugin repositories:
+
+- **File Transformation** — see its README for the manifest URL:
+  `https://www.iamparadox.dev/jellyfin/plugins/manifest.json`
+- **TeleScreenshot** — this plugin's manifest:
+  `https://vladimir214sd.github.io/jellyfin-plugin-telescreenshot/manifest.json`
+
+Then install (in order, restarting Jellyfin after the first one):
 
 1. **File Transformation** (GUID `5e87cc92-571a-4d8d-8d98-d2d4147f9f90`)
 2. **TeleScreenshot** (this plugin)
