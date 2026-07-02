@@ -28,10 +28,11 @@
                         <div class="verticalSection verticalSection-extrabottompadding">
                             <h2 class="sectionTitle" style="margin-bottom: 0.5em;">General</h2>
 
-                            <div class="inputContainer">
-                                <label class="inputLabel inputLabelUnfocused" for="chkEnabled">Enable screenshot button</label>
-                                <input type="checkbox" id="chkEnabled" is="emby-checkbox" />
-                                <div class="fieldDescription">Show the screenshot button in the player and allow sending frames to Telegram.</div>
+                            <div class="checkboxContainer checkboxContainer-withDescription">
+                                <label class="emby-checkbox-label">
+                                    <input id="chkEnabled" name="chkEnabled" type="checkbox" is="emby-checkbox" />
+                                    <span>Enable screenshot button</span>
+                                </label>
                             </div>
                         </div>
 
@@ -64,10 +65,11 @@
                                 </div>
                             </div>
 
-                            <div class="inputContainer">
-                                <label class="inputLabel inputLabelUnfocused" for="chkShowCaptureToast">Show "captured" toast</label>
-                                <input type="checkbox" id="chkShowCaptureToast" is="emby-checkbox" />
-                                <div class="fieldDescription">Show an extra toast the moment a frame is captured, before it is sent.</div>
+                            <div class="checkboxContainer checkboxContainer-withDescription">
+                                <label class="emby-checkbox-label">
+                                    <input id="chkShowCaptureToast" name="chkShowCaptureToast" type="checkbox" is="emby-checkbox" />
+                                    <span>Show "captured" toast</span>
+                                </label>
                             </div>
 
                             <button id="btnTest" type="button" is="emby-button" class="raised button-submit block emby-button">
