@@ -120,16 +120,40 @@
     }
 
     /**
-     * One-shot wrapper around ApiClient.ajax that resolves to a parsed JSON body (or null) plus
-     * status. On non-2xx responses it rejects with an Error whose message includes the body.
-     * Never throws a DOMException — auth is handled inside ApiClient.
+     * Read the JSON message out of any error shape. ApiClient.ajax rejects on non-2xx with the
+     * raw fetch Response object (which has no .message and stringifies to "[object Response]").
+     * This extracts a human-readable string from a Response, Error, or plain object.
+     */
+    function readErrorMessage(err) {
+        if (!err) return 'unknown error';
+        // fetch Response: read its body asynchronously
+        if (typeof err.json === 'function') {
+            return err.text().then(function (t) {
+                var code = err.status || '?';
+                try {
+                    var b = JSON.parse(t);
+                    return 'HTTP ' + code + ': ' + (b.message || b.Message || JSON.stringify(b));
+                } catch (e) {
+                    return 'HTTP ' + code + (t ? (': ' + t.slice(0, 200)) : '');
+                }
+            }).catch(function () { return 'HTTP ' + (err.status || '?'); });
+        }
+        if (err.message) return err.message;
+        if (typeof err === 'string') return err;
+        try { return JSON.stringify(err); } catch (e) { return '' + err; }
+    }
+
+    /**
+     * One-shot wrapper around ApiClient.ajax that resolves to { status, body }. Never rejects
+     * with a raw Response — non-2xx is normalised into an Error carrying the real body text,
+     * so error toasts show "HTTP 400: Bot token or chat id is not configured." instead of
+     * "[object Response]". Auth is handled inside ApiClient, so no DOMException.
      */
     function apiAjax(opts) {
         return getApiClient().then(function (client) {
             if (!client) {
                 throw new Error('Jellyfin ApiClient not available.');
             }
-            // ApiClient.getUrl normalises the path against the server's base URL.
             opts.url = client.getUrl(opts.url);
             return client.ajax(opts);
         }).then(function (result) {
@@ -141,6 +165,11 @@
                 catch (e) { return { status: 200, body: null, raw: result }; }
             }
             return { status: 200, body: null };
+        }).catch(function (err) {
+            // Normalise whatever ApiClient rejected with into an Error with a readable message.
+            return Promise.resolve(readErrorMessage(err)).then(function (msg) {
+                throw new Error(msg);
+            });
         });
     }
 
