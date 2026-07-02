@@ -14,8 +14,12 @@ namespace Jellyfin.Plugin.TeleScreenshot.Api;
 /// user (taking a screenshot is a client-side action); <c>/Test</c> requires elevation because
 /// it reveals bot connectivity state and is meant for administrators.
 /// </summary>
+/// <remarks>
+/// The route is pinned to <c>TeleScreenshot</c> (not derived from the class name) so the frontend
+/// can call it by that exact path regardless of the controller class name.
+/// </remarks>
 [ApiController]
-[Route("[controller]")]
+[Route("TeleScreenshot")]
 public class TelegramScreenshotController : ControllerBase
 {
     private readonly ILogger<TelegramScreenshotController> _logger;

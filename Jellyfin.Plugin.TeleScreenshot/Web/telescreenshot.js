@@ -85,11 +85,8 @@
             });
         }
         configFetchInFlight = true;
-        var url = resolveApiUrl('/TeleScreenshot/Config');
-        if (!url) { configFetchInFlight = false; return Promise.resolve(null); }
-
-        return fetchJson(url, 'GET').then(function (cfg) {
-            cachedConfig = cfg || null;
+        return apiAjax({ url: 'TeleScreenshot/Config', type: 'GET' }).then(function (r) {
+            cachedConfig = (r && r.body) || null;
             configFetchInFlight = false;
             return cachedConfig;
         }).catch(function () {
@@ -99,51 +96,51 @@
     }
 
     /**
-     * Resolve a server path to an absolute URL using whichever API client is available.
-     * jellyfin-web exposes `window.ApiClient` (the default server connection). On the web client
-     * it always carries the server origin + base URL prefix, so relative paths Just Work.
+     * Resolve the active ApiClient. jellyfin-web keeps the default connection on `window.ApiClient`,
+     * but some setups only expose it via the connectionManager module. Prefer ApiClient.ajax over
+     * a raw fetch() because it builds the absolute URL and attaches the correct auth header
+     * automatically — a hand-rolled Authorization header can throw a DOMException
+     * ("The string did not match the expected pattern") before the request goes out.
      */
-    function resolveApiUrl(path) {
+    function getApiClient() {
         try {
-            if (typeof window !== 'undefined' && window.ApiClient) {
-                if (typeof window.ApiClient.getUrl === 'function') {
-                    return window.ApiClient.getUrl(path);
-                }
-                // Some builds expose `serverAddress()` instead.
-                if (typeof window.ApiClient.serverAddress === 'function') {
-                    var base = window.ApiClient.serverAddress();
-                    if (base) return base.replace(/\/$/, '') + path;
-                }
+            if (window.ApiClient && typeof window.ApiClient.ajax === 'function') {
+                return Promise.resolve(window.ApiClient);
             }
         } catch (e) { /* fall through */ }
-        // Last resort: assume same origin.
-        return path;
+        if (typeof require !== 'undefined') {
+            return new Promise(function (resolve) {
+                require(['connectionManager'], function (cm) {
+                    var c = cm && (cm.currentApiClient ? cm.currentApiClient() : cm);
+                    resolve(c && typeof c.ajax === 'function' ? c : null);
+                }, function () { resolve(null); });
+            });
+        }
+        return Promise.resolve(null);
     }
 
     /**
-     * Build auth headers for the current Jellyfin session. jellyfin-web stores the access token
-     * on `ApiClient`; if absent we fall back to the `X-Emby-Token` query convention via the URL.
+     * One-shot wrapper around ApiClient.ajax that resolves to a parsed JSON body (or null) plus
+     * status. On non-2xx responses it rejects with an Error whose message includes the body.
+     * Never throws a DOMException — auth is handled inside ApiClient.
      */
-    function authHeaders(extra) {
-        var headers = Object.assign({ 'Content-Type': 'application/json' }, extra || {});
-        try {
-            if (window.ApiClient && typeof window.ApiClient.accessToken === 'function') {
-                var token = window.ApiClient.accessToken();
-                if (token) headers['Authorization'] = 'MediaBrowser Token="' + token + '"';
+    function apiAjax(opts) {
+        return getApiClient().then(function (client) {
+            if (!client) {
+                throw new Error('Jellyfin ApiClient not available.');
             }
-        } catch (e) { /* ignore */ }
-        return headers;
-    }
-
-    function fetchJson(url, method, body) {
-        var opts = { method: method || 'GET', headers: authHeaders() };
-        if (body !== undefined) opts.body = typeof body === 'string' ? body : JSON.stringify(body);
-        return fetch(url, opts).then(function (r) {
-            return r.text().then(function (text) {
-                var json = null;
-                try { json = text ? JSON.parse(text) : null; } catch (e) { json = null; }
-                return { status: r.status, body: json, raw: text };
-            });
+            // ApiClient.getUrl normalises the path against the server's base URL.
+            opts.url = client.getUrl(opts.url);
+            return client.ajax(opts);
+        }).then(function (result) {
+            // ApiClient.ajax auto-parses JSON when the response content-type is JSON; otherwise
+            // it returns text. Normalise both to an object.
+            if (result && typeof result === 'object') return { status: 200, body: result };
+            if (typeof result === 'string' && result.length) {
+                try { return { status: 200, body: JSON.parse(result) }; }
+                catch (e) { return { status: 200, body: null, raw: result }; }
+            }
+            return { status: 200, body: null };
         });
     }
 
@@ -216,17 +213,23 @@
      * Send a captured frame to the backend. Returns a promise resolving to the parsed response.
      */
     function sendScreenshot(imageBase64, itemId, positionTicks) {
-        var url = resolveApiUrl('/TeleScreenshot/Send');
-        if (!url) return Promise.reject(new Error('Could not resolve server URL.'));
         var payload = {
             itemId: itemId,
             positionTicks: positionTicks,
             imageBase64: imageBase64
         };
-        return fetchJson(url, 'POST', payload).then(function (r) {
-            var ok = r.status === 200 && r.body && r.body.ok;
-            var msg = (r.body && r.body.message) || ('HTTP ' + r.status);
+        return apiAjax({
+            url: 'TeleScreenshot/Send',
+            type: 'POST',
+            contentType: 'application/json',
+            data: JSON.stringify(payload)
+        }).then(function (r) {
+            var ok = r && r.body && r.body.ok;
+            var msg = (r && r.body && r.body.message) || 'sent';
             return { ok: ok, message: msg };
+        }).catch(function (err) {
+            var msg = (err && err.message) ? err.message : ('' + err);
+            return { ok: false, message: msg };
         });
     }
 

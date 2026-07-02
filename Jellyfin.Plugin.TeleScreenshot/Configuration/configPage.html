@@ -152,28 +152,39 @@
                     // not the last saved config.
                     Dashboard.showLoadingMsg();
                     ApiClient.updatePluginConfiguration(pluginId, currentConfigObject()).then(function () {
-                        return fetch(ApiClient.getUrl('/TeleScreenshot/Test'), {
-                            method: 'POST',
-                            headers: {
-                                'Authorization': 'MediaBrowser Token="' + ApiClient.accessToken() + '"',
-                                'Content-Type': 'application/json'
-                            }
+                        // Use ApiClient.ajax (the same wrapper jellyfin-web itself uses): it builds
+                        // the absolute URL and attaches the correct auth header automatically. A raw
+                        // fetch() with a hand-rolled Authorization header can throw a DOMException
+                        // ("The string did not match the expected pattern") before the request goes
+                        // out, because the header format is strict.
+                        return ApiClient.ajax({
+                            url: ApiClient.getUrl('TeleScreenshot/Test'),
+                            type: 'POST',
+                            contentType: 'application/json',
+                            data: JSON.stringify({})
                         });
-                    }).then(function (resp) {
-                        return resp.json().then(function (body) { return { status: resp.status, body: body }; });
                     }).then(function (result) {
                         Dashboard.hideLoadingMsg();
                         btnTest.disabled = false;
-                        var b = result.body || {};
-                        if (result.status === 200 && b.ok) {
+                        var b = (result && typeof result === 'object') ? result : {};
+                        if (b.ok) {
                             var name = (b.username ? '@' + b.username : '') || '';
                             setTestResult('OK — bot ' + (name || '(connected)'), true);
                         } else {
-                            setTestResult('Failed: ' + (b.message || ('HTTP ' + result.status)), false);
+                            setTestResult('Failed: ' + (b.message || 'unexpected response'), false);
                         }
                     }).catch(function (err) {
                         Dashboard.hideLoadingMsg();
                         btnTest.disabled = false;
+                        // err may be a Response object (non-2xx) — try to read its JSON body.
+                        if (err && typeof err.json === 'function') {
+                            err.json().then(function (body) {
+                                setTestResult('Failed: ' + ((body && body.message) || ('HTTP ' + (err.status || '?'))), false);
+                            }).catch(function () {
+                                setTestResult('Failed: HTTP ' + (err.status || '?'), false);
+                            });
+                            return;
+                        }
                         setTestResult('Request failed: ' + (err && err.message ? err.message : err), false);
                     });
                 });
