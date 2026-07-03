@@ -174,17 +174,67 @@
     }
 
     /**
-     * Extract the currently-playing item id from the URL hash. jellyfin-web player route looks
-     * like `#/video?id=<guid>`. Returns null if not found.
+     * Resolve the currently-playing item id by trying several sources in order. The player is an
+     * SPA overlay; depending on the jellyfin-web build the id lives in the URL hash, on a
+     * data-attribute of the OSD, or only inside the playbackManager module.
+     * Returns the guid string, or null if every source failed.
      */
-    function getItemIdFromHash() {
+    function getItemId() {
+        // 1) URL hash, e.g. #/video?id=<guid> or #/details?id=<guid>
         try {
-            var hash = (location.hash || '');
+            var hash = location.hash || '';
             var q = hash.indexOf('?');
-            if (q < 0) return null;
-            var params = new URLSearchParams(hash.slice(q + 1));
-            return params.get('id') || null;
-        } catch (e) { return null; }
+            if (q >= 0) {
+                var idParam = new URLSearchParams(hash.slice(q + 1)).get('id');
+                if (idParam) return idParam;
+            }
+        } catch (e) { /* ignore */ }
+
+        // 2) The OSD container often carries the item id on a data-* attribute.
+        try {
+            var osd = document.querySelector('.videoOsdInner, .osdInner, [data-id]');
+            if (osd) {
+                var di = osd.getAttribute('data-id')
+                    || osd.getAttribute('data-itemid')
+                    || osd.getAttribute('data-item-id');
+                if (di) return di;
+            }
+        } catch (e) { /* ignore */ }
+
+        // 3) playbackManager (AMD module) is authoritative but only resolvable asynchronously.
+        //    Callers that need it should use getItemIdAsync; this sync helper stops here.
+        return null;
+    }
+
+    /**
+     * Async variant that also consults playbackManager. Resolves to the id string or null.
+     */
+    function getItemIdAsync() {
+        var sync = getItemId();
+        if (sync) return Promise.resolve(sync);
+
+        return new Promise(function (resolve) {
+            if (typeof require === 'undefined') { resolve(null); return; }
+            var done = false;
+            function finish(val) { if (!done) { done = true; resolve(val); } }
+            try {
+                require(['playbackManager'], function (pm) {
+                    try {
+                        var player = pm && typeof pm.getCurrentPlayer === 'function' ? pm.getCurrentPlayer() : null;
+                        var item = player && typeof pm.getPlayerState === 'function' ? null : null;
+                        // Try the documented API: get playback info / current item.
+                        var current = null;
+                        if (pm && typeof pm.currentItem === 'function') current = pm.currentItem();
+                        else if (pm && typeof pm.getCurrentItem === 'function') current = pm.getCurrentItem();
+                        else if (pm && pm.currentItem) current = pm.currentItem;
+                        var id = current && (current.Id || current.id);
+                        finish(id || null);
+                    } catch (e) { finish(null); }
+                }, function () { finish(null); });
+            } catch (e) { finish(null); }
+            // Don't block the screenshot flow if the module never resolves.
+            setTimeout(function () { finish(null); }, 400);
+        });
     }
 
     /**
@@ -266,25 +316,26 @@
      * Handle the screenshot button click.
      */
     function onScreenshotClick(video) {
-        var itemId = getItemIdFromHash();
         var positionTicks = getPositionTicks(video);
-
-        // Optional "captured" toast first, then attempt send.
         var config = cachedConfig || {};
-        if (config.ShowCaptureToast !== false) {
-            // We don't know yet if capture will succeed, so only show "sending…" after capture.
-        }
 
-        captureFrame(video).then(function (base64) {
-            if (config.ShowCaptureToast !== false) {
-                toast('Screenshot captured — sending to Telegram…');
+        // Resolve the item id asynchronously (hash first, then playbackManager), THEN capture and send.
+        getItemIdAsync().then(function (itemId) {
+            if (!itemId) {
+                // Surface this so we can tell whether cast lookup is even possible.
+                console.warn('[TeleScreenshot] could not resolve current itemId; cast album will be skipped.');
             }
-            return sendScreenshot(base64, itemId, positionTicks);
+            return captureFrame(video).then(function (base64) {
+                if (config.ShowCaptureToast !== false) {
+                    toast('Screenshot captured — sending to Telegram…');
+                }
+                return sendScreenshot(base64, itemId, positionTicks);
+            });
         }).then(function (result) {
             if (result.ok) {
-                toast('Screenshot sent to Telegram.', 'success');
+                toast(result.message || 'Screenshot sent to Telegram.', 'success');
             } else {
-                toast('Telegram send failed: ' + result.message, 'error');
+                toast('Telegram send failed: ' + (result.message || 'unknown error'), 'error');
             }
         }).catch(function (err) {
             toast('Screenshot failed: ' + (err && err.message ? err.message : err), 'error');

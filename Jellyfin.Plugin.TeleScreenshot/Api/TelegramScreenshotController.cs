@@ -127,6 +127,7 @@ public class TelegramScreenshotController : ControllerBase
     {
         if (string.IsNullOrWhiteSpace(itemId) || !Guid.TryParse(itemId, out var guid))
         {
+            _logger.LogInformation("SendActorsAsync: itemId missing or invalid ({ItemId}) — cast skipped.", itemId ?? "<null>");
             return null;
         }
 
@@ -137,14 +138,17 @@ public class TelegramScreenshotController : ControllerBase
         }
         catch (Exception ex)
         {
-            _logger.LogDebug(ex, "Could not load item {ItemId} for cast lookup", itemId);
+            _logger.LogWarning(ex, "SendActorsAsync: could not load item {ItemId} for cast lookup", itemId);
             return null;
         }
 
         if (item is null)
         {
+            _logger.LogInformation("SendActorsAsync: item {ItemId} not found in library — cast skipped.", itemId);
             return null;
         }
+
+        _logger.LogInformation("SendActorsAsync: resolving cast for '{Name}' ({Type}).", item.Name, item.GetType().Name);
 
         // BaseItem.People was removed in Jellyfin 10.11; people live behind ILibraryManager.
         IReadOnlyList<PersonInfo> people;
@@ -158,6 +162,8 @@ public class TelegramScreenshotController : ControllerBase
             return null;
         }
 
+        _logger.LogInformation("SendActorsAsync: GetPeople returned {Count} people total.", people.Count);
+
         var actors = people
             .Where(p => p.Type == PersonKind.Actor)
             .OrderBy(p => p.SortOrder ?? int.MaxValue)
@@ -166,6 +172,8 @@ public class TelegramScreenshotController : ControllerBase
 
         if (actors.Count == 0)
         {
+            _logger.LogInformation("SendActorsAsync: no actors among people (types seen: {Types}).",
+                string.Join(", ", people.Select(p => p.Type.ToString()).Distinct()));
             return null;
         }
 
@@ -193,6 +201,9 @@ public class TelegramScreenshotController : ControllerBase
                 withoutPhoto.Add(label);
             }
         }
+
+        _logger.LogInformation("SendActorsAsync: {Total} actors -> {WithPhoto} with photo, {WithoutPhoto} without.",
+            actors.Count, withPhoto.Count, withoutPhoto.Count);
 
         int albumsOk = 0;
         int albumsFail = 0;
