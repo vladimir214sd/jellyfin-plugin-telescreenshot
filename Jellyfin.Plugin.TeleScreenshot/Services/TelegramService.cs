@@ -35,6 +35,24 @@ public sealed class TelegramResult
 
     /// <summary>Bot username (only populated by <see cref="TelegramService.TestAsync"/>)</summary>
     public string? Username { get; init; }
+
+    /// <summary>
+    /// Seconds to wait before retrying, as reported by Telegram flood control
+    /// (<c>parameters.retry_after</c> on a 429). Null when not a rate-limit response.
+    /// </summary>
+    public int? RetryAfter { get; init; }
+}
+
+/// <summary>
+/// A single photo plus its on-wire metadata for an album send.
+/// </summary>
+public sealed record ActorPhoto
+{
+    public byte[] Bytes { get; init; } = Array.Empty<byte>();
+    public string FileName { get; init; } = "actor.jpg";
+    public string MimeType { get; init; } = "image/jpeg";
+    /// <summary>Per-photo caption (e.g. "Keanu Reeves — Neo"). Only the first in a group is shown.</summary>
+    public string? Caption { get; init; }
 }
 
 /// <summary>
@@ -116,6 +134,114 @@ public sealed class TelegramService
     }
 
     /// <summary>
+    /// Sends an album of 2-10 photos via <c>sendMediaGroup</c> using multipart/form-data.
+    /// Each binary part is named <c>photoN</c> and referenced in the <c>media</c> JSON array as
+    /// <c>attach://photoN</c>. Only the first photo's caption is rendered by Telegram clients.
+    /// </summary>
+    /// <exception cref="ArgumentOutOfRangeException">
+    /// Thrown if <paramref name="photos"/> does not contain 2-10 items (the API hard limits).
+    /// </exception>
+    public async Task<TelegramResult> SendMediaGroupAsync(
+        string botToken,
+        string chatId,
+        IReadOnlyList<ActorPhoto> photos,
+        string? caption = null,
+        CancellationToken ct = default)
+    {
+        if (photos.Count is < 2 or > 10)
+        {
+            throw new ArgumentOutOfRangeException(nameof(photos),
+                "sendMediaGroup requires 2-10 photos.");
+        }
+
+        using var form = new MultipartFormDataContent();
+
+        form.Add(new StringContent(chatId), "chat_id");
+
+        // Build the media JSON array with Utf8JsonWriter (precise control over which item
+        // carries the caption). Only index 0 gets caption + parse_mode.
+        using var stream = new MemoryStream();
+        using (var writer = new Utf8JsonWriter(stream))
+        {
+            writer.WriteStartArray();
+            for (int i = 0; i < photos.Count; i++)
+            {
+                writer.WriteStartObject();
+                writer.WriteString("type", "photo");
+                writer.WriteString("media", $"attach://photo{i}");
+                if (i == 0 && !string.IsNullOrEmpty(caption))
+                {
+                    string cap = caption.Length > 1024 ? caption[..1024] : caption;
+                    writer.WriteString("caption", cap);
+                    writer.WriteString("parse_mode", "HTML");
+                }
+                writer.WriteEndObject();
+            }
+            writer.WriteEndArray();
+            await writer.FlushAsync(ct).ConfigureAwait(false);
+        }
+        string mediaJson = System.Text.Encoding.UTF8.GetString(stream.ToArray());
+        form.Add(new StringContent(mediaJson), "media");
+
+        // Binary parts: the field name "photoN" MUST match the attach://photoN token above.
+        for (int i = 0; i < photos.Count; i++)
+        {
+            var photo = photos[i];
+            var part = new ByteArrayContent(photo.Bytes);
+            part.Headers.ContentType = new MediaTypeHeaderValue(photo.MimeType);
+            form.Add(part, $"photo{i}", photo.FileName);
+        }
+
+        try
+        {
+            using var resp = await _client.Http.PostAsync(_client.Url(botToken, "sendMediaGroup"), form, ct)
+                .ConfigureAwait(false);
+            var result = await ParseAsync(resp, ct).ConfigureAwait(false);
+            return result.Ok
+                ? result
+                : new TelegramResult { Ok = false, Message = "Telegram error: " + result.Message, RetryAfter = result.RetryAfter };
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Telegram sendMediaGroup request failed");
+            return new TelegramResult { Ok = false, Message = "Network error: " + ex.Message };
+        }
+    }
+
+    /// <summary>
+    /// Sends a plain text message via <c>sendMessage</c>. Used for the list of actors that have
+    /// no photo in Jellyfin.
+    /// </summary>
+    public async Task<TelegramResult> SendMessageAsync(
+        string botToken,
+        string chatId,
+        string text,
+        CancellationToken ct = default)
+    {
+        // Telegram caps message text at 4096 chars; truncate defensively.
+        string body = text.Length > 4096 ? text[..4096] : text;
+
+        using var form = new MultipartFormDataContent();
+        form.Add(new StringContent(chatId), "chat_id");
+        form.Add(new StringContent(body), "text");
+
+        try
+        {
+            using var resp = await _client.Http.PostAsync(_client.Url(botToken, "sendMessage"), form, ct)
+                .ConfigureAwait(false);
+            var result = await ParseAsync(resp, ct).ConfigureAwait(false);
+            return result.Ok
+                ? result
+                : new TelegramResult { Ok = false, Message = "Telegram error: " + result.Message, RetryAfter = result.RetryAfter };
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Telegram sendMessage request failed");
+            return new TelegramResult { Ok = false, Message = "Network error: " + ex.Message };
+        }
+    }
+
+    /// <summary>
     /// Parses a generic Telegram JSON response (<c>{ ok, result?, error_code?, description? }</c>)
     /// into a <see cref="TelegramResult"/>. Returns <c>ok=true</c> when the body's <c>ok</c> is true.
     /// </summary>
@@ -127,6 +253,7 @@ public sealed class TelegramService
         string description = string.Empty;
         int errorCode = 0;
         string? username = null;
+        int? retryAfter = null;
 
         try
         {
@@ -153,6 +280,15 @@ public sealed class TelegramService
             {
                 username = unameEl.GetString();
             }
+
+            // Flood control: { parameters: { retry_after: <seconds> } }
+            if (doc.RootElement.TryGetProperty("parameters", out var parEl)
+                && parEl.ValueKind == JsonValueKind.Object
+                && parEl.TryGetProperty("retry_after", out var raEl)
+                && raEl.TryGetInt32(out int ra))
+            {
+                retryAfter = ra;
+            }
         }
         catch (JsonException)
         {
@@ -168,6 +304,7 @@ public sealed class TelegramService
         {
             Ok = ok,
             Username = username,
+            RetryAfter = retryAfter,
             Message = ok
                 ? (username is null ? "OK" : username)
                 : (errorCode > 0 ? $"{errorCode}: {description}" : $"HTTP {(int)resp.StatusCode}: {description}")

@@ -3,7 +3,7 @@
 # Hand-edited values; `manifest.json` is generated from this + computed checksum.
 name: "TeleScreenshot"
 guid: "13ec7a52-d9a7-46c3-be6c-c58149187a6c"
-version: "1.0.3.0"
+version: "1.1.0.0"
 targetAbi: "10.11.0.0"
 framework: "net9.0"
 overview: "Screenshot button in the Jellyfin web player that sends the frame to a Telegram bot."
@@ -23,3 +23,6 @@ changelog: |
   - Frame capture via canvas drawImage -> sendPhoto (multipart/form-data).
   - Caption with item title and timecode.
   - "Test connection" button in the settings page (Telegram getMe).
+  - Cast album: on screenshot, also sends the full cast to Telegram as photo
+    albums (sendMediaGroup, 10 per album) for actors that have a photo, plus a
+    text message listing actors without a photo. Always on, no settings.
