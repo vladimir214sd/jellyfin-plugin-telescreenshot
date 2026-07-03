@@ -317,13 +317,13 @@ public class TelegramScreenshotController : ControllerBase
                     .GetAwaiter().GetResult();
             }
 
-            if (string.IsNullOrWhiteSpace(info.Path) || !File.Exists(info.Path))
+            if (string.IsNullOrWhiteSpace(info.Path) || !System.IO.File.Exists(info.Path))
             {
                 return false;
             }
 
-            byte[] bytes = File.ReadAllBytes(info.Path);
-            string ext = Path.GetExtension(info.Path).ToLowerInvariant();
+            byte[] bytes = System.IO.File.ReadAllBytes(info.Path);
+            string ext = System.IO.Path.GetExtension(info.Path).ToLowerInvariant();
             string mimeType = ext switch
             {
                 ".png" => "image/png",
