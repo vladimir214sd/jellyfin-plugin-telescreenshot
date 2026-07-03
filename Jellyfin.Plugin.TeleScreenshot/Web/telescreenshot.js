@@ -18,9 +18,12 @@
 
     var BUTTON_ID = 'telescreenshot-btn';
     var VIDEO_SELECTOR = 'video.htmlvideoplayer';
-    // OSD buttons live in `.osdControls`; individual control rows are `.osdControls .btn`. We
-    // append our own button and let CSS position it; selector is intentionally lenient.
-    var OSD_CONTAINER_SELECTOR = '.videoOsdInner, .osdInner, .osdControls';
+    // The OSD button row in modern jellyfin-web is `.osdControls .buttons.focuscontainer-x`.
+    // Older builds used `.videoOsdInner` / `.osdInner`. Listed most-specific first.
+    var OSD_CONTAINER_SELECTOR = '#videoOsdPage .osdControls .buttons.focuscontainer-x, '
+        + '.videoOsdBottom .osdControls .buttons.focuscontainer-x, '
+        + '.osdControls .buttons, '
+        + '.videoOsdInner, .osdInner, .osdControls';
 
     // Plugin config is cached after the first successful fetch so we can hide the button when
     // the plugin is disabled without re-fetching on every mutation.
@@ -174,13 +177,42 @@
     }
 
     /**
-     * Resolve the currently-playing item id by trying several sources in order. The player is an
-     * SPA overlay; depending on the jellyfin-web build the id lives in the URL hash, on a
-     * data-attribute of the OSD, or only inside the playbackManager module.
-     * Returns the guid string, or null if every source failed.
+     * Resolve the currently-playing item id from the DOM. The player is an SPA overlay on top of
+     * the library pages, so a naive `[data-id]` lookup matches a library card that is still
+     * mounted behind the player (that bug resolved the id to the "Фильмы" folder, not the episode).
+     *
+     * The reliable source is the OSD's rating button (`.btnUserRating`): jellyfin-web calls
+     * `btnUserRating.setItem(currentItem)` on it during playback, which sets `data-id` to the
+     * playing item's DTO id. All lookups are scoped to the OSD page to avoid matching background
+     * library cards. Modern jellyfin-web (v12) is webpack-bundled and exposes no `require()` /
+     * `window.playbackManager`, so a module-based lookup is not possible from page context.
+     *
+     * Returns the guid string, or null if not found.
      */
     function getItemId() {
-        // 1) URL hash, e.g. #/video?id=<guid> or #/details?id=<guid>
+        // 1) OSD rating button carries the current item's id as data-id (capital-I DTO id).
+        try {
+            var ratingBtn = document.querySelector('#videoOsdPage .btnUserRating')
+                || document.querySelector('.videoOsdBottom .btnUserRating')
+                || document.querySelector('.btnUserRating');
+            var rid = ratingBtn && ratingBtn.getAttribute('data-id');
+            if (rid) return rid;
+        } catch (e) { /* ignore */ }
+
+        // 2) OSD-scoped data attributes (defensive — current web doesn't set these on the OSD,
+        //    but older builds may).
+        try {
+            var osd = document.querySelector('#videoOsdPage .osdControls')
+                || document.querySelector('.videoOsdBottom .osdControls');
+            if (osd) {
+                var di = osd.getAttribute('data-id')
+                    || osd.getAttribute('data-itemid')
+                    || osd.getAttribute('data-item-id');
+                if (di) return di;
+            }
+        } catch (e) { /* ignore */ }
+
+        // 3) URL hash as a last resort, e.g. #/video?id=<guid>.
         try {
             var hash = location.hash || '';
             var q = hash.indexOf('?');
@@ -190,51 +222,14 @@
             }
         } catch (e) { /* ignore */ }
 
-        // 2) The OSD container often carries the item id on a data-* attribute.
-        try {
-            var osd = document.querySelector('.videoOsdInner, .osdInner, [data-id]');
-            if (osd) {
-                var di = osd.getAttribute('data-id')
-                    || osd.getAttribute('data-itemid')
-                    || osd.getAttribute('data-item-id');
-                if (di) return di;
-            }
-        } catch (e) { /* ignore */ }
-
-        // 3) playbackManager (AMD module) is authoritative but only resolvable asynchronously.
-        //    Callers that need it should use getItemIdAsync; this sync helper stops here.
         return null;
     }
 
     /**
-     * Async variant that also consults playbackManager. Resolves to the id string or null.
+     * Async wrapper kept for the call site; id resolution is synchronous from the DOM.
      */
     function getItemIdAsync() {
-        var sync = getItemId();
-        if (sync) return Promise.resolve(sync);
-
-        return new Promise(function (resolve) {
-            if (typeof require === 'undefined') { resolve(null); return; }
-            var done = false;
-            function finish(val) { if (!done) { done = true; resolve(val); } }
-            try {
-                require(['playbackManager'], function (pm) {
-                    try {
-                        var player = pm && typeof pm.getCurrentPlayer === 'function' ? pm.getCurrentPlayer() : null;
-                        var item = player && typeof pm.getPlayerState === 'function' ? null : null;
-                        // Try the documented API: get playback info / current item.
-                        var current = null;
-                        if (pm && typeof pm.currentItem === 'function') current = pm.currentItem();
-                        else if (pm && typeof pm.getCurrentItem === 'function') current = pm.getCurrentItem();
-                        else if (pm && pm.currentItem) current = pm.currentItem;
-                        var id = current && (current.Id || current.id);
-                        finish(id || null);
-                    } catch (e) { finish(null); }
-                }, function () { finish(null); });
-            } catch (e) { finish(null); }
-            // Don't block the screenshot flow if the module never resolves.
-            setTimeout(function () { finish(null); }, 400);
-        });
+        return Promise.resolve(getItemId());
     }
 
     /**
